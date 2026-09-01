@@ -1,0 +1,130 @@
+name: Buscar turno de semipermanente
+
+on:
+  workflow_dispatch:
+
+jobs:
+  buscar-turnos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Buscar turnos durante 10 minutos
+        run: |
+          cat << 'PYTHON' > monitor.py
+          import re
+          import time
+          import urllib.request
+          from playwright.sync_api import sync_playwright
+
+          URL = "https://bookings.cloud.microsoft/book/ManicuriaPP@gimargentinos.onmicrosoft.com/?ismsaljsauthenabled=true"
+          NTFY_TOPIC = "manicuria-0e356e3fc7fa4f4482623c9d1ce32c9e"
+
+          def avisar(horarios):
+              mensaje = (
+                  "HAY TURNOS DE SEMIPERMANENTE!\n"
+                  "Horarios: " + ", ".join(horarios) +
+                  "\n\nToca la notificacion para reservar."
+              )
+
+              req = urllib.request.Request(
+                  "https://ntfy.sh/" + NTFY_TOPIC,
+                  data=mensaje.encode("utf-8"),
+                  headers={
+                      "Title": "💅 TURNO DISPONIBLE",
+                      "Priority": "urgent",
+                      "Click": URL
+                  },
+                  method="POST"
+              )
+
+              urllib.request.urlopen(req, timeout=20).read()
+
+          def buscar(browser):
+              page = browser.new_page(locale="es-AR")
+
+              try:
+                  print("Abriendo Microsoft Bookings...")
+                  page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+                  page.wait_for_timeout(5000)
+
+                  print("Buscando Semipermanente...")
+
+                  servicio = page.get_by_text(
+                      re.compile("Semipermanente", re.I)
+                  )
+
+                  if servicio.count() == 0:
+                      print("No encontre Semipermanente")
+                      return []
+
+                  servicio.first.click()
+                  print("Semipermanente seleccionado")
+
+                  page.wait_for_timeout(7000)
+
+                  textos = page.locator(
+                      "button, [role='button'], label"
+                  ).all_inner_texts()
+
+                  horarios = set()
+
+                  patron = re.compile(
+                      r"(?<!\d)(?:[01]?\d|2[0-3]):[0-5]\d(?!\d)"
+                  )
+
+                  for texto in textos:
+                      for hora in patron.findall(texto):
+                          horarios.add(hora)
+
+                  return sorted(horarios)
+
+              finally:
+                  page.close()
+
+          with sync_playwright() as p:
+
+              browser = p.chromium.launch(headless=True)
+
+              try:
+
+                  for intento in range(3):
+
+                      print("")
+                      print("==============================")
+                      print("CHEQUEO", intento + 1, "DE 3")
+                      print("==============================")
+
+                      try:
+                          horarios = buscar(browser)
+                      except Exception as e:
+                          print("Error:", e)
+                          horarios = []
+
+                      if horarios:
+                          print("TURNOS ENCONTRADOS:", horarios)
+                          avisar(horarios)
+                          break
+
+                      print("No hay turnos disponibles")
+
+                      if intento < 2:
+                          print("Esperando 5 minutos...")
+                          time.sleep(300)
+
+              finally:
+                  browser.close()
+
+          PYTHON
+
+          python monitor.py
