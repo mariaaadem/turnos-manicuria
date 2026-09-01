@@ -2,14 +2,20 @@ name: Buscar turno de semipermanente
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+concurrency:
+  group: turnos-manicuria
+  cancel-in-progress: false
 
 jobs:
   buscar-turnos:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 4
 
     steps:
-      - name: Instalar Python
+      - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -19,26 +25,29 @@ jobs:
           pip install playwright
           playwright install --with-deps chromium
 
-      - name: Buscar turnos durante 10 minutos
+      - name: Revisar Semipermanente
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          cat << 'PYTHON' > monitor.py
+          python - <<'PYTHON'
+          import os
           import re
-          import time
           import urllib.request
           from playwright.sync_api import sync_playwright
 
           URL = "https://bookings.cloud.microsoft/book/ManicuriaPP@gimargentinos.onmicrosoft.com/?ismsaljsauthenabled=true"
-          NTFY_TOPIC = "manicuria-0e356e3fc7fa4f4482623c9d1ce32c9e"
+          TOPIC = os.environ["NTFY_TOPIC"]
 
           def avisar(horarios):
               mensaje = (
-                  "HAY TURNOS DE SEMIPERMANENTE!\n"
-                  "Horarios: " + ", ".join(horarios) +
-                  "\n\nToca la notificacion para reservar."
+                  "🚨 HAY TURNOS DE SEMIPERMANENTE!\n\n"
+                  + "Horarios visibles: "
+                  + ", ".join(horarios)
+                  + "\n\nTocá la notificación para reservar."
               )
 
               req = urllib.request.Request(
-                  "https://ntfy.sh/" + NTFY_TOPIC,
+                  "https://ntfy.sh/" + TOPIC,
                   data=mensaje.encode("utf-8"),
                   headers={
                       "Title": "💅 TURNO DISPONIBLE",
@@ -50,12 +59,18 @@ jobs:
 
               urllib.request.urlopen(req, timeout=20).read()
 
-          def buscar(browser):
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
               page = browser.new_page(locale="es-AR")
 
               try:
                   print("Abriendo Microsoft Bookings...")
-                  page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+                  page.goto(
+                      URL,
+                      wait_until="domcontentloaded",
+                      timeout=60000
+                  )
+
                   page.wait_for_timeout(5000)
 
                   print("Buscando Semipermanente...")
@@ -65,11 +80,12 @@ jobs:
                   )
 
                   if servicio.count() == 0:
-                      print("No encontre Semipermanente")
-                      return []
+                      print("No encontré Semipermanente.")
+                      raise SystemExit(0)
 
                   servicio.first.click()
-                  print("Semipermanente seleccionado")
+
+                  print("Semipermanente seleccionado.")
 
                   page.wait_for_timeout(7000)
 
@@ -77,54 +93,25 @@ jobs:
                       "button, [role='button'], label"
                   ).all_inner_texts()
 
-                  horarios = set()
-
-                  patron = re.compile(
+                  patron_hora = re.compile(
                       r"(?<!\d)(?:[01]?\d|2[0-3]):[0-5]\d(?!\d)"
                   )
 
+                  horarios = set()
+
                   for texto in textos:
-                      for hora in patron.findall(texto):
+                      for hora in patron_hora.findall(texto):
                           horarios.add(hora)
 
-                  return sorted(horarios)
+                  horarios = sorted(horarios)
 
-              finally:
-                  page.close()
-
-          with sync_playwright() as p:
-
-              browser = p.chromium.launch(headless=True)
-
-              try:
-
-                  for intento in range(3):
-
-                      print("")
-                      print("==============================")
-                      print("CHEQUEO", intento + 1, "DE 3")
-                      print("==============================")
-
-                      try:
-                          horarios = buscar(browser)
-                      except Exception as e:
-                          print("Error:", e)
-                          horarios = []
-
-                      if horarios:
-                          print("TURNOS ENCONTRADOS:", horarios)
-                          avisar(horarios)
-                          break
-
-                      print("No hay turnos disponibles")
-
-                      if intento < 2:
-                          print("Esperando 5 minutos...")
-                          time.sleep(300)
+                  if horarios:
+                      print("🚨 TURNOS ENCONTRADOS:", horarios)
+                      avisar(horarios)
+                  else:
+                      print("No hay turnos disponibles.")
 
               finally:
                   browser.close()
 
           PYTHON
-
-          python monitor.py
