@@ -12,9 +12,22 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          curl -fsS \
-            -H "Title: PRUEBA TURNOS" \
-            -H "Priority: urgent" \
-            -H "Click: https://bookings.cloud.microsoft/book/ManicuriaPP@gimargentinos.onmicrosoft.com/?ismsaljsauthenabled=true" \
-            -d "Prueba exitosa. Si recibiste esto, las notificaciones de turnos funcionan." \
-            "https://ntfy.sh/${NTFY_TOPIC}"
+          python - <<'PYTHON'
+          import os
+          import urllib.request
+
+          topic = os.environ["NTFY_TOPIC"].strip()
+
+          req = urllib.request.Request(
+              "https://ntfy.sh/" + topic,
+              data="Prueba exitosa. Las notificaciones de turnos funcionan.".encode("utf-8"),
+              headers={
+                  "Title": "PRUEBA TURNOS",
+                  "Priority": "urgent"
+              },
+              method="POST"
+          )
+
+          urllib.request.urlopen(req, timeout=20).read()
+          print("Notificacion enviada correctamente")
+          PYTHON
