@@ -1,0 +1,20 @@
+name: Probar notificacion ntfy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prueba:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Enviar notificacion
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          curl -fsS \
+            -H "Title: PRUEBA TURNOS" \
+            -H "Priority: urgent" \
+            -H "Click: https://bookings.cloud.microsoft/book/ManicuriaPP@gimargentinos.onmicrosoft.com/?ismsaljsauthenabled=true" \
+            -d "Prueba exitosa. Si recibiste esto, las notificaciones de turnos funcionan." \
+            "https://ntfy.sh/${NTFY_TOPIC}"
