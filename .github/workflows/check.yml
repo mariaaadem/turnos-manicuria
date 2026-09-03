@@ -1,117 +1,33 @@
-name: Buscar turno de semipermanente
+name: Probar notificacion ntfy
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
-
-concurrency:
-  group: turnos-manicuria
-  cancel-in-progress: false
 
 jobs:
-  buscar-turnos:
+  prueba:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
 
     steps:
-      - name: Configurar Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Instalar Playwright
-        run: |
-          pip install playwright
-          playwright install --with-deps chromium
-
-      - name: Revisar Semipermanente
+      - name: Enviar notificacion
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
           python - <<'PYTHON'
           import os
-          import re
           import urllib.request
-          from playwright.sync_api import sync_playwright
 
-          URL = "https://bookings.cloud.microsoft/book/ManicuriaPP@gimargentinos.onmicrosoft.com/?ismsaljsauthenabled=true"
-          TOPIC = os.environ["NTFY_TOPIC"]
+          topic = os.environ["NTFY_TOPIC"].strip()
 
-          def avisar(horarios):
-              mensaje = (
-                  "🚨 HAY TURNOS DE SEMIPERMANENTE!\n\n"
-                  + "Horarios visibles: "
-                  + ", ".join(horarios)
-                  + "\n\nTocá la notificación para reservar."
-              )
+          req = urllib.request.Request(
+              "https://ntfy.sh/" + topic,
+              data="Prueba exitosa. Si recibiste esto, las notificaciones de turnos funcionan.".encode("utf-8"),
+              headers={
+                  "Title": "PRUEBA TURNOS",
+                  "Priority": "urgent"
+              },
+              method="POST"
+          )
 
-              req = urllib.request.Request(
-                  "https://ntfy.sh/" + TOPIC,
-                  data=mensaje.encode("utf-8"),
-                  headers={
-                      "Title": "💅 TURNO DISPONIBLE",
-                      "Priority": "urgent",
-                      "Click": URL
-                  },
-                  method="POST"
-              )
-
-              urllib.request.urlopen(req, timeout=20).read()
-
-          with sync_playwright() as p:
-              browser = p.chromium.launch(headless=True)
-              page = browser.new_page(locale="es-AR")
-
-              try:
-                  print("Abriendo Microsoft Bookings...")
-                  page.goto(
-                      URL,
-                      wait_until="domcontentloaded",
-                      timeout=60000
-                  )
-
-                  page.wait_for_timeout(5000)
-
-                  print("Buscando Semipermanente...")
-
-                  servicio = page.get_by_text(
-                      re.compile("Semipermanente", re.I)
-                  )
-
-                  if servicio.count() == 0:
-                      print("No encontré Semipermanente.")
-                      raise SystemExit(0)
-
-                  servicio.first.click()
-
-                  print("Semipermanente seleccionado.")
-
-                  page.wait_for_timeout(7000)
-
-                  textos = page.locator(
-                      "button, [role='button'], label"
-                  ).all_inner_texts()
-
-                  patron_hora = re.compile(
-                      r"(?<!\d)(?:[01]?\d|2[0-3]):[0-5]\d(?!\d)"
-                  )
-
-                  horarios = set()
-
-                  for texto in textos:
-                      for hora in patron_hora.findall(texto):
-                          horarios.add(hora)
-
-                  horarios = sorted(horarios)
-
-                  if horarios:
-                      print("🚨 TURNOS ENCONTRADOS:", horarios)
-                      avisar(horarios)
-                  else:
-                      print("No hay turnos disponibles.")
-
-              finally:
-                  browser.close()
-
+          urllib.request.urlopen(req, timeout=20).read()
+          print("Notificacion enviada")
           PYTHON
