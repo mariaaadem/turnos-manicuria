@@ -2,8 +2,6 @@ name: Buscar turno de semipermanente
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
 
 concurrency:
   group: turnos-manicuria
